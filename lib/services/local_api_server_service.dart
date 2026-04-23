@@ -21,15 +21,22 @@ class LocalApiServerService extends GetxService {
   final isStarting = false.obs;
   final errorMessage = ''.obs;
   final port = defaultPort.obs;
+  final allInterfaces = false.obs;
 
-  String get host => defaultHost;
-  String get baseUrl => 'http://$host:${port.value}/v1';
+  String get host => allInterfaces.value ? '0.0.0.0' : defaultHost;
+  String get baseUrl {
+    if (allInterfaces.value) {
+      return 'http://<device-ip>:${port.value}/v1';
+    }
+    return 'http://$defaultHost:${port.value}/v1';
+  }
   bool get isBusy => _llm.isGenerating.value;
   bool get hasLoadedModel => _llm.isLoaded.value;
   String get modelId => _llm.publicModelId;
 
   Future<LocalApiServerService> init() async {
     port.value = _normalizePort(_storage.localApiServerPort);
+    allInterfaces.value = _storage.localApiAllInterfaces;
     if (_storage.localApiServerEnabled) {
       await start();
     }
@@ -47,8 +54,12 @@ class LocalApiServerService extends GetxService {
     errorMessage.value = '';
 
     try {
+      final bindAddress = allInterfaces.value
+          ? InternetAddress.anyIPv4
+          : InternetAddress.loopbackIPv4;
+
       _server = await HttpServer.bind(
-        InternetAddress.loopbackIPv4,
+        bindAddress,
         nextPort,
         shared: false,
       );
@@ -96,6 +107,33 @@ class LocalApiServerService extends GetxService {
     if (isRunning.value) {
       await start(requestedPort: normalized);
     }
+  }
+
+  Future<void> setAllInterfaces(bool value) async {
+    allInterfaces.value = value;
+    _storage.localApiAllInterfaces = value;
+    if (isRunning.value) {
+      // Restart with new binding
+      await start();
+    }
+  }
+
+  /// Get the device's local network IP address.
+  Future<String?> getDeviceIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback) {
+            return addr.address;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   int _normalizePort(int value) {

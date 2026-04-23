@@ -7,6 +7,8 @@ import '../services/llm_service.dart';
 import '../services/model_manager.dart';
 import '../services/chat_storage_service.dart';
 import '../services/local_api_server_service.dart';
+import '../services/wakelock_service.dart';
+import '../services/background_optimizer_service.dart';
 import '../routes/app_routes.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -39,8 +41,16 @@ class _SplashScreenState extends State<SplashScreen> {
       setState(() => _status = 'Preparing local API...');
       await Get.find<LocalApiServerService>().init();
 
+      setState(() => _status = 'Setting up background services...');
+      await Get.find<WakelockService>().init();
+
       setState(() => _status = 'Ready!');
       await Future.delayed(const Duration(milliseconds: 500));
+
+      // Prompt for battery optimization on Android (first launch only)
+      if (mounted) {
+        await BackgroundOptimizerService.checkAndPrompt(context);
+      }
 
       Get.offAllNamed(AppRoutes.home);
     } catch (e) {

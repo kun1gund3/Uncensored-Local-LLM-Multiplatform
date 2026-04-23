@@ -89,4 +89,10 @@ class ChatStorageService extends GetxService {
 
   set localApiServerPort(int value) =>
       _settingsBox.put('local_api_server_port', value);
+
+  bool get localApiAllInterfaces =>
+      _settingsBox.get('local_api_all_interfaces', defaultValue: false) as bool;
+
+  set localApiAllInterfaces(bool value) =>
+      _settingsBox.put('local_api_all_interfaces', value);
 }

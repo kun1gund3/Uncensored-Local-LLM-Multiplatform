@@ -35,6 +35,11 @@ dependencies:
   flutter_animate: ^4.5.0          # Micro-animations
   cupertino_icons: ^1.0.8
 
+  # ── Background / Wake Lock ─────────────────────────────────────
+  wakelock_plus: ^1.2.10             # Keep screen on during downloads
+  flutter_foreground_task: ^9.2.2    # Foreground service for downloads/inference
+  disable_battery_optimization: ^1.1.1 # Guide users to disable battery optimization
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -49,6 +54,7 @@ hooks:
         platforms:
           linux-x64: [vulkan]
           windows-x64: [vulkan]
+          android-arm64: [cpu]
 
 flutter:
   uses-material-design: true

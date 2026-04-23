@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -13,26 +16,44 @@ import 'screens/splash_screen.dart'; // needed in routes/app_routes.dart
 import 'routes/app_routes.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Wrap entire app in error zone to catch native/async crashes
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  // Init Hive
-  final appDir = await getApplicationDocumentsDirectory();
-  await Hive.initFlutter(appDir.path);
+    // Catch Flutter framework errors (rendering, layout, etc.)
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      debugPrint('FlutterError: ${details.exception}');
+    };
 
-  // Register Hive adapters
-  Hive.registerAdapter(ChatModelAdapter());
-  Hive.registerAdapter(MessageModelAdapter());
-  Hive.registerAdapter(MessageRoleAdapter());
+    // Catch unhandled platform errors (native crashes, isolate errors)
+    PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('PlatformError: $error\n$stack');
+      return true; // Prevent app from crashing
+    };
 
-  // Open Hive boxes
-  await Hive.openBox<ChatModel>('chats');
-  await Hive.openBox('settings');
-  await Hive.openBox('models_meta');
+    // Init Hive
+    final appDir = await getApplicationDocumentsDirectory();
+    await Hive.initFlutter(appDir.path);
 
-  // Load theme preference
-  final themeController = Get.put(ThemeController());
+    // Register Hive adapters
+    Hive.registerAdapter(ChatModelAdapter());
+    Hive.registerAdapter(MessageModelAdapter());
+    Hive.registerAdapter(MessageRoleAdapter());
 
-  runApp(PortableAIApp(themeController: themeController));
+    // Open Hive boxes
+    await Hive.openBox<ChatModel>('chats');
+    await Hive.openBox('settings');
+    await Hive.openBox('models_meta');
+
+    // Load theme preference
+    final themeController = Get.put(ThemeController());
+
+    runApp(PortableAIApp(themeController: themeController));
+  }, (error, stack) {
+    // Last-resort error handler — prevents silent force-close
+    debugPrint('Unhandled error: $error\n$stack');
+  });
 }
 
 class PortableAIApp extends StatelessWidget {

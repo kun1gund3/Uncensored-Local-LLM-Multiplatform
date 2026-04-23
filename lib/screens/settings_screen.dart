@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -6,6 +7,7 @@ import '../controllers/chat_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../services/local_api_server_service.dart';
 import '../services/model_manager.dart';
+import '../services/background_optimizer_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   /// When true, no Scaffold — just the body content for embedding in tabs.
@@ -113,6 +115,43 @@ class _SettingsBody extends StatelessWidget {
                   ),
                 ),
               ),
+
+              if (Platform.isAndroid) ...[
+                const SizedBox(height: 12),
+                _card(
+                  context,
+                  child: ListTile(
+                    title: Text(
+                      'Battery Optimization',
+                      style: TextStyle(color: context.text, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Disable to prevent background killing',
+                      style: TextStyle(color: context.textD, fontSize: 12),
+                    ),
+                    trailing: FutureBuilder<bool>(
+                      future: BackgroundOptimizerService.isOptimizationDisabled(),
+                      builder: (context, snapshot) {
+                        final disabled = snapshot.data ?? false;
+                        if (disabled) {
+                          return const Icon(Icons.check_circle_rounded,
+                              color: AppColors.green, size: 20);
+                        }
+                        return const Icon(Icons.arrow_forward_ios_rounded,
+                            size: 14, color: AppColors.orange);
+                      },
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    onTap: () async {
+                      await BackgroundOptimizerService.openBatterySettings();
+                      // Ignore setState, it will rebuild on next visit
+                    },
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 28),
 
@@ -308,18 +347,81 @@ class _SettingsBody extends StatelessWidget {
                           contentPadding: EdgeInsets.zero,
                         ),
                         const SizedBox(height: 12),
+                        SwitchListTile(
+                          title: Text(
+                            'Allow External Connections',
+                            style: TextStyle(color: context.text, fontSize: 14),
+                          ),
+                          subtitle: Text(
+                            'Listen on 0.0.0.0 instead of localhost',
+                            style: TextStyle(
+                              color: context.textD,
+                              fontSize: 12,
+                            ),
+                          ),
+                          value: apiServer.allInterfaces.value,
+                          onChanged: starting
+                              ? null
+                              : (enabled) async {
+                                  try {
+                                    await apiServer.setAllInterfaces(enabled);
+                                  } catch (e) {
+                                    Get.snackbar(
+                                      'Settings Error',
+                                      e.toString(),
+                                      snackPosition: SnackPosition.BOTTOM,
+                                    );
+                                  }
+                                },
+                          activeThumbColor: AppColors.orange,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        if (apiServer.allInterfaces.value)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4, bottom: 8),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.orange.withOpacity(0.1),
+                              border: Border.all(color: AppColors.orange.withOpacity(0.3)),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.orange),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Anyone on your network can access your loaded model.',
+                                    style: TextStyle(fontSize: 11, color: context.text),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 12),
                         Row(
                           children: [
                             _statusChip(context, statusText, statusColor),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: SelectableText(
-                                apiServer.baseUrl,
-                                style: TextStyle(
-                                  color: context.text,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                              child: FutureBuilder<String?>(
+                                future: apiServer.allInterfaces.value
+                                    ? apiServer.getDeviceIp()
+                                    : Future.value(null),
+                                builder: (context, snapshot) {
+                                  String url = apiServer.baseUrl;
+                                  if (apiServer.allInterfaces.value && snapshot.hasData) {
+                                    url = 'http://${snapshot.data}:${apiServer.port.value}/v1';
+                                  }
+                                  return SelectableText(
+                                    url,
+                                    style: TextStyle(
+                                      color: context.text,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  );
+                                }
                               ),
                             ),
                           ],

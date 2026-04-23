@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hive/hive.dart';
@@ -9,6 +10,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/ai_model_info.dart';
 import '../models/download_state.dart';
+import 'wakelock_service.dart';
 
 /// Manages model catalog, downloads, and local file discovery.
 class ModelManager extends GetxService {
@@ -113,10 +115,20 @@ class ModelManager extends GetxService {
   }
 
   /// Download a model with real-time speed tracking.
+  /// Enables wake lock + foreground service to keep download alive.
   Future<void> downloadModel(AiModelInfo model) async {
     if (isDownloading(model.filename)) return;
 
-    // Initialize download state
+    // Enable wake lock + foreground service for download (fire and forget so UI updates instantly)
+    WakelockService? wakelockService;
+    try {
+      wakelockService = Get.find<WakelockService>();
+      wakelockService.enableForDownload(modelName: model.name);
+    } catch (e) {
+      debugPrint('WakelockService not available: $e');
+    }
+
+    // Initialize download state instantly
     activeDownloads[model.filename] = DownloadState(
       filename: model.filename,
       totalBytes: model.sizeGb * 1024 * 1024 * 1024,
@@ -170,6 +182,17 @@ class ModelManager extends GetxService {
           lastSpeedCheck = stopwatch.elapsedMilliseconds;
           lastSpeedBytes = receivedBytes;
           _notifyUI(); // trigger rebuild
+
+          // Update foreground notification with progress
+          if (wakelockService != null && state.totalBytes > 0) {
+            final progress = state.receivedBytes / state.totalBytes;
+            final speedMb = (state.speedBytesPerSec / (1024 * 1024)).toStringAsFixed(1);
+            wakelockService.updateDownloadProgress(
+              modelName: model.name,
+              progress: progress,
+              speedText: '$speedMb MB/s',
+            );
+          }
         }
       }
 
@@ -195,6 +218,13 @@ class ModelManager extends GetxService {
     } finally {
       _httpClient?.close();
       _httpClient = null;
+
+      // Disable wake lock if no other downloads are active
+      if (activeDownloads.isEmpty) {
+        try {
+          await wakelockService?.disable();
+        } catch (_) {}
+      }
     }
   }
 

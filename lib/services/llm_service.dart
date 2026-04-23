@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:llamadart/llamadart.dart';
 import 'package:path/path.dart' as p;
+
+import 'wakelock_service.dart';
 
 /// Wraps llamadart's LlamaEngine for model loading, generation, and lifecycle.
 class LlmService extends GetxService {
@@ -66,6 +69,12 @@ class LlmService extends GetxService {
     loadingProgress.value = 0.0;
     loadingStatusMsg.value = 'Preparing...';
 
+    // Enable wake lock during model loading (heavy memory operation)
+    WakelockService? wakelockService;
+    try {
+      wakelockService = Get.find<WakelockService>();
+    } catch (_) {}
+
     // Unload previous if any — MUST fully tear down engine + backend
     if (_engine != null || isLoaded.value) {
       loadingStatusMsg.value = 'Unloading previous model...';
@@ -80,8 +89,21 @@ class LlmService extends GetxService {
     }
 
     // Fresh backend + engine for every load — prevents stale native state
-    _backend = LlamaBackend();
-    _engine = LlamaEngine(_backend!);
+    // Wrapped in try-catch to handle SELinux crashes on Android where
+    // ggml_backend_load_all() attempts to scan '/' which is denied.
+    try {
+      _backend = LlamaBackend();
+      _engine = LlamaEngine(_backend!);
+    } catch (e) {
+      _backend = null;
+      _engine = null;
+      _resetLoadingState();
+      throw Exception(
+        'Failed to initialize AI engine. '
+        'This may be a device compatibility issue. '
+        'Error: $e',
+      );
+    }
 
     try {
       loadingStatusMsg.value = 'Loading into memory...';
@@ -115,11 +137,15 @@ class LlmService extends GetxService {
         return;
       }
 
+      // Use smaller context on Android to prevent OOM kills.
+      // Desktop can handle 2048, but Android devices with limited RAM
+      // need 1024 to avoid the Low Memory Killer (LMK).
+      final contextSize = Platform.isAndroid ? 1024 : 2048;
+
       // Exclusively use CPU backend to strictly avoid any driver-level GPU init hangs.
       // Optimize threads: 4 for both generation and batch processing to keep memory stable.
-      // Lower contextSize to 2048 to prevent Android Low Memory Killer (LMK) from silently killing the app.
       final params = ModelParams(
-        contextSize: 2048,
+        contextSize: contextSize,
         gpuLayers: 0, 
         preferredBackend: GpuBackend.cpu,
         numberOfThreads: Platform.numberOfProcessors > 4 ? 4 : 0, 
@@ -141,12 +167,27 @@ class LlmService extends GetxService {
       isLoaded.value = true;
       loadedModelPath.value = path;
 
+      // Enable wake lock for inference on mobile (keeps app from being killed)
+      final modelName = p.basenameWithoutExtension(path);
+      await wakelockService?.enableForInference(modelName: modelName);
+
       // Brief delay to show 100%
       await Future.delayed(const Duration(milliseconds: 300));
     } catch (e) {
       isLoaded.value = false;
       loadedModelPath.value = '';
       await _fullTeardown();
+
+      // Provide a clearer error message for common Android failures
+      if (Platform.isAndroid) {
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains('memory') || errStr.contains('alloc')) {
+          throw Exception(
+            'Not enough RAM to load this model. '
+            'Try a smaller model (e.g. Gemma 2 2B at 1.6 GB).',
+          );
+        }
+      }
       rethrow;
     } finally {
       _resetLoadingState();
@@ -351,6 +392,12 @@ class LlmService extends GetxService {
   /// Unload the current model and free memory.
   Future<void> unloadModel() async {
     await _fullTeardown();
+
+    // Disable wake lock when model is unloaded
+    try {
+      final wakelockService = Get.find<WakelockService>();
+      await wakelockService.disable();
+    } catch (_) {}
   }
 
   /// Build a single prompt string from chat messages.
